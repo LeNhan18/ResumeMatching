@@ -327,26 +327,27 @@ class VectorDBClient:
                     indices.append(token_hash)
                     values.append(weight)
                 
-                # Fetch dense matches
-                dense_results = self.real_client.search(
+                # Fetch dense matches using query_points
+                dense_response = self.real_client.query_points(
                     collection_name=self.collection_name,
-                    query_vector=("dense", dense_query),
+                    query=dense_query,
+                    using="dense",
                     query_filter=qdrant_filter,
                     limit=limit * 2,
                     with_payload=True
                 )
+                dense_results = dense_response.points
                 
-                # Fetch sparse matches
-                sparse_results = self.real_client.search(
+                # Fetch sparse matches using query_points
+                sparse_response = self.real_client.query_points(
                     collection_name=self.collection_name,
-                    query_vector=models.NamedSparseVector(
-                        name="sparse",
-                        vector=models.SparseVector(indices=indices, values=values)
-                    ),
+                    query=models.SparseVector(indices=indices, values=values),
+                    using="sparse",
                     query_filter=qdrant_filter,
                     limit=limit * 2,
                     with_payload=True
                 )
+                sparse_results = sparse_response.points
 
                 # Collect and match items to compute individual score matrices
                 candidates = {}

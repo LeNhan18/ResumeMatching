@@ -8,6 +8,7 @@ class WorkExperience(BaseModel):
     end_date: Optional[str] = Field(None, description="End date (e.g., '2022-05', 'Present', or null if currently working)")
     skills_used: List[str] = Field(default_factory=list, description="Key skills and technologies used in this job")
     seniority_level: str = Field("Mid", description="Seniority level: Junior, Mid, Senior, Lead, Manager, etc.")
+    experience_type: str = Field("Corporate", description="Type of experience: 'Corporate' (full-time/part-time company job), 'Internship', 'Freelance', 'Personal Project', 'Academic Project'")
     description: Optional[str] = Field(None, description="Brief description of responsibilities and achievements")
 
 class EducationInfo(BaseModel):
