@@ -66,24 +66,21 @@ def upload_cv(file: UploadFile = File(...)):
     if not pipeline:
         raise HTTPException(status_code=530, detail="Matcher pipeline is not initialized")
     try:
-        # Create temp folder inside workspace
-        temp_dir = os.path.join(os.path.dirname(__file__), "temp")
-        os.makedirs(temp_dir, exist_ok=True)
+        # Create uploads folder inside workspace if it doesn't exist
+        upload_dir = os.path.join(os.path.dirname(__file__), "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
         
-        file_ext = os.path.splitext(file.filename)[1]
-        temp_filename = f"{uuid.uuid4().hex}{file_ext}"
-        temp_path = os.path.join(temp_dir, temp_filename)
+        cv_id = f"cv_{uuid.uuid4().hex[:8]}"
         
-        logger.info(f"Saving uploaded file temporarily to {temp_path}")
-        with open(temp_path, "wb") as f:
+        # Save to uploads folder permanently with a unique prefix to avoid collisions
+        safe_filename = f"{cv_id}_{file.filename}"
+        saved_path = os.path.join(upload_dir, safe_filename)
+        
+        logger.info(f"Saving uploaded file permanently to {saved_path}")
+        with open(saved_path, "wb") as f:
             f.write(file.file.read())
             
-        cv_id = f"cv_{uuid.uuid4().hex[:8]}"
-        cv_schema = pipeline.ingest_cv(temp_path, cv_id=cv_id)
-        
-        # Cleanup
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        cv_schema = pipeline.ingest_cv(saved_path, cv_id=cv_id)
             
         return {
             "status": "success",
@@ -92,9 +89,9 @@ def upload_cv(file: UploadFile = File(...)):
         }
     except Exception as e:
         logger.error(f"Error ingesting uploaded CV: {e}", exc_info=True)
-        if 'temp_path' in locals() and os.path.exists(temp_path):
+        if 'saved_path' in locals() and os.path.exists(saved_path):
             try:
-                os.remove(temp_path)
+                os.remove(saved_path)
             except:
                 pass
         raise HTTPException(status_code=500, detail=str(e))
@@ -104,9 +101,22 @@ def delete_candidate(id: str):
     if not pipeline:
         raise HTTPException(status_code=503, detail="Matcher pipeline is not initialized")
     try:
+        # Get candidate payload first to find physical file path
+        cv_payload = pipeline.vector_db.get_cv(id)
+        file_path = cv_payload.get("file_path") if cv_payload else None
+
         success = pipeline.vector_db.delete_cv(id)
         if not success:
             raise HTTPException(status_code=404, detail=f"Candidate with ID '{id}' not found")
+            
+        # Delete local physical file if it exists
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Deleted local CV file: {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to delete local file '{file_path}': {e}")
+                
         return {"status": "success"}
     except HTTPException as he:
         raise he
@@ -171,13 +181,23 @@ def load_samples():
             ("HoangThaiAnh_AIEngineer.pdf", "hoang_thai_anh"),
             ("LeThanhNhanCVTiengViet.pdf", "le_thanh_nhan")
         ]
+        upload_dir = os.path.join(os.path.dirname(__file__), "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        
         ingested = []
-        for file_path, cv_id in sample_cvs:
-            full_path = os.path.join(os.path.dirname(__file__), file_path)
+        import shutil
+        for file_name, cv_id in sample_cvs:
+            full_path = os.path.join(os.path.dirname(__file__), file_name)
             if os.path.exists(full_path):
-                logger.info(f"Auto-ingesting sample CV: {file_path}")
-                cv_schema = pipeline.ingest_cv(full_path, cv_id=cv_id)
-                ingested.append({"id": cv_id, "name": cv_schema.name, "file": file_path})
+                # Copy to uploads permanently with unique name
+                unique_filename = f"{cv_id}_{file_name}"
+                saved_path = os.path.join(upload_dir, unique_filename)
+                
+                logger.info(f"Copying sample CV {file_name} to permanent store: {saved_path}")
+                shutil.copy2(full_path, saved_path)
+                
+                cv_schema = pipeline.ingest_cv(saved_path, cv_id=cv_id)
+                ingested.append({"id": cv_id, "name": cv_schema.name, "file": file_name})
             else:
                 logger.warning(f"Sample CV not found at: {full_path}")
                 

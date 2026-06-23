@@ -104,7 +104,12 @@ def hard_match(cv: CVSchema, jd: JDSchema) -> Dict[str, Any]:
         desc = exp.description.lower() if exp.description else ""
         
         # Exclude personal/academic projects and freelance work from core experience calculations
-        is_academic_or_freelance = any(kw in comp or kw in pos or kw in desc for kw in academic_or_freelance_keywords)
+        is_academic_or_freelance = False
+        if hasattr(exp, "experience_type") and exp.experience_type:
+            is_academic_or_freelance = exp.experience_type in ["Freelance", "Personal Project", "Academic Project"]
+        else:
+            is_academic_or_freelance = any(kw in comp or kw in pos or kw in desc for kw in academic_or_freelance_keywords)
+            
         if is_academic_or_freelance:
             continue
             
@@ -184,7 +189,12 @@ def hard_match(cv: CVSchema, jd: JDSchema) -> Dict[str, Any]:
         desc = exp.description.lower() if exp.description else ""
         
         # Determine if this role qualifies as a full-time or intern industry position (not freelance or academic)
-        is_academic_or_freelance = any(kw in comp or kw in pos or kw in desc for kw in academic_or_freelance_keywords)
+        is_academic_or_freelance = False
+        if hasattr(exp, "experience_type") and exp.experience_type:
+            is_academic_or_freelance = exp.experience_type in ["Freelance", "Personal Project", "Academic Project"]
+        else:
+            is_academic_or_freelance = any(kw in comp or kw in pos or kw in desc for kw in academic_or_freelance_keywords)
+            
         if not is_academic_or_freelance:
             duration = calculate_duration_months(exp.start_date, exp.end_date)
             practical_months += duration
@@ -334,9 +344,18 @@ class Reranker:
                 comp = exp.get("company", "").lower()
                 pos = exp.get("position", "").lower()
                 desc = exp.get("description", "").lower() if exp.get("description") else ""
-                is_academic_or_freelance = any(kw in comp or kw in pos or kw in desc for kw in academic_or_freelance_keywords)
-                if not is_academic_or_freelance:
+                
+                is_academic_or_freelance = False
+                is_intern = False
+                exp_type = exp.get("experience_type")
+                if exp_type:
+                    is_academic_or_freelance = exp_type in ["Freelance", "Personal Project", "Academic Project"]
+                    is_intern = exp_type == "Internship"
+                else:
+                    is_academic_or_freelance = any(kw in comp or kw in pos or kw in desc for kw in academic_or_freelance_keywords)
                     is_intern = any(kw in comp or kw in pos or kw in desc for kw in intern_keywords)
+                    
+                if not is_academic_or_freelance:
                     if is_intern:
                         has_internship = True
                     else:

@@ -34,7 +34,14 @@ class CVMatcherPipeline:
         system_prompt = (
             "You are a professional HR data extraction system. You extract candidate information "
             "from raw CV text into a structured JSON schema. Standardize work experience date ranges "
-            "into 'YYYY-MM' or 'YYYY' format. For ongoing jobs, write 'Present'."
+            "into 'YYYY-MM' or 'YYYY' format. For ongoing jobs, write 'Present'.\n"
+            "CRITICAL classification rule for each item in the 'experience' list:\n"
+            "- If an item represents a full-time, part-time, or contract job at an actual company, startup, or organization, classify its experience_type as 'Corporate'.\n"
+            "- If it is a trainee, intern, or apprenticeship role at a company, classify its experience_type as 'Internship'.\n"
+            "- If it is freelance work, self-employment, or contracted freelance, classify its experience_type as 'Freelance'.\n"
+            "- If it is a personal pet project, self-study project, or side hustle, classify its experience_type as 'Personal Project'.\n"
+            "- If it is a university assignment, graduation thesis, lab project, or course homework, classify its experience_type as 'Academic Project'.\n"
+            "Be very careful and look at section headers (e.g., 'PROJECTS', 'DỰ ÁN' vs 'WORK EXPERIENCE', 'KINH NGHIỆM') in the CV to classify correctly."
         )
         prompt = (
             f"Please extract all details from this candidate's CV text into the requested schema.\n\n"
@@ -54,6 +61,7 @@ class CVMatcherPipeline:
         # 3. Save to vector DB (which indexes dense + sparse and stores CV payload)
         # We serialize the Pydantic schema into a dictionary to store in payload
         cv_payload = cv_schema.model_dump()
+        cv_payload["file_path"] = file_path
         self.vector_db.upsert_cv(cv_id, cv_text, cv_payload)
         
         return cv_schema
