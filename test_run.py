@@ -34,12 +34,12 @@ def main():
     # Collect CVs that exist
     cv_configs = []
     if os.path.exists(cv_file_1):
-        cv_configs.append((cv_file_1, "hoang_thai_anh"))
+        cv_configs.append((cv_file_1, "11111111-1111-1111-1111-111111111111"))
     else:
         logger.warning(f"CV file not found (skipping): {cv_file_1}")
         
     if os.path.exists(cv_file_2):
-        cv_configs.append((cv_file_2, "ai_engineer_intern"))
+        cv_configs.append((cv_file_2, "22222222-2222-2222-2222-222222222222"))
     else:
         logger.warning(f"CV file not found (skipping): {cv_file_2}")
         

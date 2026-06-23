@@ -70,7 +70,7 @@ def upload_cv(file: UploadFile = File(...)):
         upload_dir = os.path.join(os.path.dirname(__file__), "uploads")
         os.makedirs(upload_dir, exist_ok=True)
         
-        cv_id = f"cv_{uuid.uuid4().hex[:8]}"
+        cv_id = str(uuid.uuid4())
         
         # Save to uploads folder permanently with a unique prefix to avoid collisions
         safe_filename = f"{cv_id}_{file.filename}"
@@ -178,8 +178,8 @@ def load_samples():
         raise HTTPException(status_code=503, detail="Matcher pipeline is not initialized")
     try:
         sample_cvs = [
-            ("HoangThaiAnh_AIEngineer.pdf", "hoang_thai_anh"),
-            ("LeThanhNhanCVTiengViet.pdf", "le_thanh_nhan")
+            ("HoangThaiAnh_AIEngineer.pdf", "11111111-1111-1111-1111-111111111111"),
+            ("LeThanhNhanCVTiengViet.pdf", "22222222-2222-2222-2222-222222222222")
         ]
         upload_dir = os.path.join(os.path.dirname(__file__), "uploads")
         os.makedirs(upload_dir, exist_ok=True)
