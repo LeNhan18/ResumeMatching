@@ -189,7 +189,7 @@ class CVMatcherPipeline:
             
             # Run Scorer
             scoring_res = self.scorer.score_candidate(cv, jd, hard_match_res, soft_score, weights)
-            
+            # scoring_res_making = self.
             ranked_results.append({
                 "candidate_id": cv_id,
                 "candidate_name": cv.name,

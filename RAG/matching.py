@@ -121,6 +121,7 @@ def hard_match(cv: CVSchema, jd: JDSchema) -> Dict[str, Any]:
         # Criteria A: Overlap in skills used
         if exp_skills.intersection(all_target_skills):
             is_relevant = True
+
             
         # Criteria B: Position title or description contains domain keywords
         elif jd_domain in exp_position or (exp.description and jd_domain in exp.description.lower()):
@@ -191,7 +192,7 @@ def hard_match(cv: CVSchema, jd: JDSchema) -> Dict[str, Any]:
         # Determine if this role qualifies as a full-time or intern industry position (not freelance or academic)
         is_academic_or_freelance = False
         if hasattr(exp, "experience_type") and exp.experience_type:
-            is_academic_or_freelance = exp.experience_type in ["Freelance", "Personal Project", "Academic Project"]
+            is_academic_or_freelance = exp.experience_type in ["Freelance", "Personal Project", "Academic Project","Project"]
         else:
             is_academic_or_freelance = any(kw in comp or kw in pos or kw in desc for kw in academic_or_freelance_keywords)
             
