@@ -5,8 +5,10 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from RAG.schemas import CVSchema, JDSchema
+from GRAPHRAG.falkordb_graph import FalkorDBGraph
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger("Matching", log_file="matching.log")
 
 # =====================================================================
 # 1. Date Utility Functions for Work Experience Calculations
@@ -143,7 +145,19 @@ def hard_match(cv: CVSchema, jd: JDSchema) -> Dict[str, Any]:
     for exp in cv.experience:
         cv_skills_set.update(s.lower() for s in exp.skills_used)
         
-    matched_required = cv_skills_set.intersection(jd_req_skills_set)
+    matched_required = set()
+    for req_skill in jd_req_skills_set:
+        req_skill_lower = req_skill.lower()
+        if req_skill_lower in cv_skills_set:
+            matched_required.add(req_skill)
+        else:
+            # Check if any CV skill token is contained within the JD required skill as a standalone word
+            for cv_skill in cv_skills_set:
+                escaped_cv = re.escape(cv_skill)
+                if re.search(r'\b' + escaped_cv + r'\b', req_skill_lower):
+                    matched_required.add(req_skill)
+                    break
+                    
     required_skills_ratio = len(matched_required) / len(jd_req_skills_set) if jd_req_skills_set else 1.0
     skills_passed = required_skills_ratio >= 0.5  # E.g. Candidate must have at least 50% of required skills to pass hard filter
 
@@ -155,9 +169,9 @@ def hard_match(cv: CVSchema, jd: JDSchema) -> Dict[str, Any]:
         candidate_degrees = [edu.degree.lower() for edu in cv.education if edu.degree]
         
         if "master" in edu_req or "thạc sĩ" in edu_req:
-            edu_passed = any("master" in d or "thạc s" in d or "phd" in d or "tiến s" in d for d in candidate_degrees)
+            edu_passed = any("master" in d or "thạc sĩ" in d or "phd" in d or "tiến sĩ" in d for d in candidate_degrees)
         elif "phd" in edu_req or "tiến sĩ" in edu_req:
-            edu_passed = any("phd" in d or "tiến s" in d for d in candidate_degrees)
+            edu_passed = any("phd" in d or "tiến sĩ" in d for d in candidate_degrees)
         elif "bachelor" in edu_req or "cử nhân" in edu_req or "kỹ sư" in edu_req or "engineer" in edu_req:
             edu_passed = any("bachelor" in d or "cử nhân" in d or "kỹ sư" in d or "engineer" in d or "master" in d or "phd" in d for d in candidate_degrees)
 
@@ -255,10 +269,141 @@ def reciprocal_rank_fusion(dense_hits: List[Dict[str, Any]], sparse_hits: List[D
     fused.sort(key=lambda x: x["rrf_score"], reverse=True)
     return fused
 
+class GraphScorer:
+    """Sử dụng Đồ thị Tri thức để tính điểm ngữ nghĩa (Graph-based Semantic Score)."""
+    def __init__(self, graph: FalkorDBGraph = None):
+        try:
+            self.graph = graph.graph if graph else FalkorDBGraph().graph
+        except Exception as e:
+            logger.error(f"Could not initialize FalkorDBGraph for GraphScorer: {e}")
+            self.graph = None
+
+    def calculate_skill_affinity(self, candidate_id: str, jd_skills: List[str]) -> tuple[float, List[str]]:
+        """Calculate similarity of skills in CV and JD using Graph anchor"""
+        if not self.graph or not candidate_id or not jd_skills: return 0.0, []
+        jd_s = [s.lower().strip() for s in jd_skills if s and s.strip()]
+        if not jd_s: return 0.0, []
+
+        cypher = """
+        MATCH (c:Candidate {id_node: $candidate_id})-[:HAS_SKILL]->(cv_s:Skill)-[r:ALTERNATIVE_TO]-(jd_s:Skill)
+        WHERE toLower(jd_s.name) IN $jd_skills
+        RETURN cv_s.name, jd_s.name, r.similarity
+        """
+        try:
+            res = self.graph.query(cypher, params={'candidate_id': str(candidate_id), 'jd_skills': jd_s})
+            score = 0.0
+            insights = []
+            if res.result_set:
+                for row in res.result_set:
+                    cv_skill, jd_skill, sim = row[0], row[1], row[2] if row[2] else 0.5
+                    score += sim
+                    insights.append(f"Kỹ năng tương đương: Sở hữu '{cv_skill}' có thể thay thế cho '{jd_skill}' (độ tương đồng {sim})")
+            return min(0.3, score * 0.1), insights
+        except Exception as e:
+            logger.error(f"GraphScorer skill error: {e}")
+            return 0.0, []
+
+    def check_position_match(self, candidate_id: str, jd_position: str) -> tuple[float, List[str]]:
+        """Check equivalent position match using Graph anchor"""
+        if not self.graph or not candidate_id or not jd_position: return 0.0, []
+        cypher = """
+        MATCH (c:Candidate {id_node: $candidate_id})-[:HELD_POSITION]->(cv_p:JobPosition)-[:EQUIVALENT_TO]-(jd_p:JobPosition)
+        WHERE toLower(jd_p.name) = $jd_position
+        RETURN cv_p.name, jd_p.name
+        """
+        try:
+            res = self.graph.query(cypher, params={'candidate_id': str(candidate_id), 'jd_position': jd_position.lower().strip()})
+            insights = []
+            if res.result_set:
+                count = len(res.result_set)
+                for row in res.result_set:
+                    insights.append(f"Chức danh tương đương: Đã từng làm '{row[0]}' tương đương với chức danh '{row[1]}' yêu cầu.")
+                return (0.3 if count > 0 else 0.0), insights
+            return 0.0, []
+        except Exception as e:
+            logger.error(f"GraphScorer position error: {e}")
+            return 0.0, []
+
+    def check_industry_match(self, candidate_id: str, jd_industry: str) -> tuple[float, List[str]]:
+        """Check industry match between CV and JD using Graph anchor"""
+        if not self.graph or not candidate_id or not jd_industry: return 0.0, []
+        cypher = """
+        MATCH (c:Candidate {id_node: $candidate_id})-[:WORKED_AT]->(comp:Company)-[:BELONGS_TO]->(i:Industry)
+        WHERE toLower(i.name) = $jd_industry
+        RETURN comp.name, i.name
+        """
+        try:
+            res = self.graph.query(cypher, params={'candidate_id': str(candidate_id), 'jd_industry': jd_industry.lower().strip()})
+            insights = []
+            if res.result_set:
+                count = len(res.result_set)
+                for row in res.result_set:
+                    insights.append(f"Ngành nghề phù hợp: Đã làm việc tại công ty '{row[0]}' thuộc mảng '{row[1]}'.")
+                return (0.2 if count > 0 else 0.0), insights
+            return 0.0, []
+        except Exception as e:
+            logger.error(f"GraphScorer industry error: {e}")
+            return 0.0, []
+
+    def check_major_match(self, candidate_id: str, jd_major: str) -> tuple[float, List[str]]:
+        """Check major match between CV and JD using Graph anchor"""
+        if not self.graph or not candidate_id or not jd_major: return 0.0, []
+        cypher = """
+        MATCH (c:Candidate {id_node: $candidate_id})-[:STUDIED_MAJOR]->(cv_m:Major)-[:RELATED_MAJOR]-(jd_m:Major)
+        WHERE toLower(jd_m.name) = $jd_major
+        RETURN cv_m.name, jd_m.name
+        """
+        try:
+            res = self.graph.query(cypher, params={'candidate_id': str(candidate_id), 'jd_major': jd_major.lower().strip()})
+            insights = []
+            if res.result_set:
+                count = len(res.result_set)
+                for row in res.result_set:
+                    insights.append(f"Ngành học liên quan: Tốt nghiệp ngành '{row[0]}' được đánh giá liên quan mật thiết với ngành '{row[1]}'.")
+                return (0.2 if count > 0 else 0.0), insights
+            return 0.0, []
+        except Exception as e:
+            logger.error(f"GraphScorer major error: {e}")
+            return 0.0, []
+
+    def get_graph_score_and_insights(self, candidate_id: str, jd: JDSchema) -> Dict[str, Any]:
+        """Runs all sub-metrics to calculate total score and aggregate insights."""
+        total_score = 0.0
+        all_insights = []
+        
+        if not self.graph or not candidate_id or not jd:
+            return {"total_score": 0.0, "insights": []}
+            
+        if jd.required_skills:
+            score, insights = self.calculate_skill_affinity(candidate_id, jd.required_skills)
+            total_score += score
+            all_insights.extend(insights)
+            
+        if jd.position:
+            score, insights = self.check_position_match(candidate_id, jd.position)
+            total_score += score
+            all_insights.extend(insights)
+            
+        if jd.industry:
+            score, insights = self.check_industry_match(candidate_id, jd.industry)
+            total_score += score
+            all_insights.extend(insights)
+            
+        if jd.major:
+            score, insights = self.check_major_match(candidate_id, jd.major)
+            total_score += score
+            all_insights.extend(insights)
+            
+        # Deduplicate insights just in case
+        insights_unique = list(set(all_insights))
+        return {"total_score": total_score, "insights": insights_unique}
+
 class Reranker:
-    """Handles re-ranking candidates using local models or lexical/semantic heuristic fallbacks."""
-    def __init__(self):
+    """Handles re-ranking candidates using local models, heuristic fallbacks, and Graph DB."""
+    def __init__(self, graph_db: FalkorDBGraph = None):
         self.local_model = None
+        self.graph_scorer = GraphScorer(graph_db)
+        
         if os.getenv("USE_LOCAL_RERANKER", "false").lower() == "true":
             try:
                 from sentence_transformers import CrossEncoder
@@ -268,7 +413,7 @@ class Reranker:
             except ImportError:
                 logger.warning("sentence-transformers not installed. Reranker will run in HEURISTIC mode.")
 
-    def rerank(self, query: str, candidates: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
+    def rerank(self, query: str, candidates: List[Dict[str, Any]], jd: JDSchema = None, limit: int = 5) -> List[Dict[str, Any]]:
         """Re-ranks candidates based on direct textual relevance to query (JD)."""
         if not candidates:
             return []
@@ -292,12 +437,16 @@ class Reranker:
             except Exception as e:
                 logger.error(f"Error during cross-encoder reranking: {e}. Falling back to heuristic.")
 
-        # 2. Heuristic fallback (Jaccard similarity of skills, experience alignment, and keyword overlap)
-        return self._heuristic_rerank(query, candidates, limit)
+        # 2. Heuristic & Graph fallback
+        return self._heuristic_rerank(query, candidates, jd, limit)
 
-    def _heuristic_rerank(self, query: str, candidates: List[Dict[str, Any]], limit: int = 5) -> List[Dict[str, Any]]:
-        """Computes a heuristic alignment score based on token overlap & structural fields."""
+    def _heuristic_rerank(self, query: str, candidates: List[Dict[str, Any]], jd: JDSchema = None, limit: int = 5) -> List[Dict[str, Any]]:
+        """Computes a heuristic alignment score based on token overlap & structural fields + Graph."""
         query_words = set(re.findall(r'\b\w+\b', query.lower()))
+        
+        # Normalize sparse scores
+        max_sparse = max((cand.get("sparse_score", 0.0) for cand in candidates), default=1.0)
+        if max_sparse <= 0.0: max_sparse = 1.0
         
         for cand in candidates:
             payload = cand["payload"]
@@ -366,12 +515,23 @@ class Reranker:
             elif has_internship:
                 exp_boost = 0.10
 
-            # Estimate rerank score using jaccard + database vector similarity scores
+            # Calculate Graph Score (Layer 5.5)
+            graph_score = 0.0
+            graph_insights = []
+            cv_id = cand.get("id")
+            
+            if jd and cv_id:
+                graph_data = self.graph_scorer.get_graph_score_and_insights(cv_id, jd)
+                graph_score = graph_data["total_score"]
+                graph_insights = graph_data["insights"]
+                cand["graph_insights"] = graph_insights
+
+            # Estimate rerank score using dense + sparse + jaccard + heuristics + graph
             dense_score = cand.get("dense_score", 0.5)
-            sparse_score = cand.get("sparse_score", 0.5)
+            sparse_score = cand.get("sparse_score", 0.0) / max_sparse # Normalized [0, 1]
             
             # Hybrid weighted combination
-            cand["rerank_score"] = (dense_score * 0.4) + (sparse_score * 0.3) + (jaccard * 0.3) + english_boost + exp_boost
+            cand["rerank_score"] = (dense_score * 0.3) + (sparse_score * 0.2) + (jaccard * 0.1) + (graph_score * 0.4) + english_boost + exp_boost
             
         candidates.sort(key=lambda x: x["rerank_score"], reverse=True)
         return candidates[:limit]
