@@ -1,10 +1,11 @@
 import logging
 from typing import Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from LLM.client import LLMClient
 from RAG.schemas import CVSchema, JDSchema, ScoringWeights, ScoringResult, ScoringBreakdown
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger("Scoring", log_file="scoring.log")
 
 class LLMScorer:
     def __init__(self, llm_client: LLMClient):
@@ -16,7 +17,8 @@ class LLMScorer:
         jd: JDSchema, 
         hard_match_res: Dict[str, Any], 
         soft_match_score: float, 
-        weights: ScoringWeights
+        weights: ScoringWeights,
+        graph_insights: list[str] = None
     ) -> ScoringResult:
         """
         Runs qualitative scoring on a CV against a JD.
@@ -76,8 +78,18 @@ class LLMScorer:
             
             f"### SYSTEM SCORING PRIORITIES:\n"
             f"1. **PRIORITIZE COMPANY EXPERIENCE**: Candidates with actual corporate employment history at companies (full-time or contract roles, clear job descriptions) must be scored significantly higher in the 'experience' category. Candidates whose history consists only of personal projects, academic/university assignments, or self-study/pet projects must be penalized and scored under 50/100 for 'experience', even if they have many projects.\n"
-            f"2. **PRIORITIZE ENGLISH CERTIFICATES**: Candidates who have verified English certificates (such as IELTS, TOEIC, TOEFL, PTE, CEFR, etc.) must receive a significant positive boost (e.g., +10 to +15 points in the education or culture/suitability categories) compared to candidates without certified proof. You must explicitly list this certificate in their 'strengths' list.\n\n"
+            f"2. **PRIORITIZE ENGLISH CERTIFICATES**: Candidates who have verified English certificates (such as IELTS, TOEIC, TOEFL, PTE, CEFR, etc.) must receive a significant positive boost (e.g., +10 to +15 points in the education or culture/suitability categories) compared to candidates without certified proof. You must explicitly list this certificate in their 'strengths' list.\n"
+        )
+        
+        if graph_insights:
+            prompt += "\n### KNOWLEDGE GRAPH INSIGHTS (LAYER 5.5):\n"
+            for insight in graph_insights:
+                prompt += f"- {insight}\n"
+            prompt += "\nUse these graph insights to write Strengths and to justify the Skills and Experience scores. Do NOT penalize missing skills if the graph found an alternative.\n\n"
+        else:
+            prompt += "\n"
             
+        prompt += (
             f"### SCORING RUBRIC (Rate each category out of 100):\n"
             f"1. Skills Score: Technical overlap, expertise depth, usage of skills in past jobs.\n"
             f"2. Experience Score: Industry tenure, career progression (e.g. Junior -> Mid -> Senior), job stability, domain expertise.\n"
@@ -92,21 +104,32 @@ class LLMScorer:
             "You are an expert HR AI Assessor. Provide objective scoring evaluations for candidate CVs against Job Descriptions. "
             "You MUST output structured JSON rating the candidate in the four categories (skills, experience, education, culture_fit), "
             "along with a list of missing_skills, strengths, and detailed justification reasoning.\n"
-            "CRITICAL: Write all qualitative text fields ('reasoning', 'strengths', 'missing_skills') in Vietnamese (Tiếng Việt). "
+            "CRITICAL: Write all qualitative text fields ('reasoning_skills', 'reasoning_experience', 'strengths', 'missing_skills', etc.) in Vietnamese (Tiếng Việt). "
             "Keep technical terms (e.g. Python, Docker, FastAPI, ReactJS, SQL, RAG) in their original English form without translation.\n"
             "Note: Do not output 'match_score' directly as it is calculated deterministically by our framework; "
-            "focus on rating the categories (0 to 100) and providing qualitative notes."
+            "focus on rating the categories (0 to 100) and providing qualitative notes.\n"
+            "COT RULE: You MUST think step-by-step. Provide your detailed analytical reasoning for a category BEFORE outputting the numerical score for that category."
         )
+        
+        if graph_insights:
+            system_prompt += (
+                "\nCRITICAL XAI RULE: Do not penalize the candidate or list a skill as 'missing_skills' "
+                "if the KNOWLEDGE GRAPH INSIGHTS explicitly states they possess an alternative/equivalent skill. "
+                "You must list these graph insights in the 'strengths' and 'reasoning' arrays."
+            )
 
         # Temporary Pydantic schema for LLM output (excludes final match_score calculation)
         class LLMScoringResponse(BaseModel):
-            skills: float
-            experience: float
-            education: float
-            culture_fit: float
+            reasoning_skills: str = Field(description="Phân tích kỹ năng trước khi chấm điểm")
+            skills: float = Field(description="Điểm kỹ năng (0-100)")
+            reasoning_experience: str = Field(description="Phân tích kinh nghiệm làm việc trước khi chấm điểm")
+            experience: float = Field(description="Điểm kinh nghiệm (0-100)")
+            reasoning_education: str = Field(description="Phân tích học vấn trước khi chấm điểm")
+            education: float = Field(description="Điểm học vấn (0-100)")
+            reasoning_culture: str = Field(description="Phân tích độ phù hợp văn hóa trước khi chấm điểm")
+            culture_fit: float = Field(description="Điểm phù hợp văn hóa (0-100)")
             missing_skills: list[str]
             strengths: list[str]
-            reasoning: str
 
         try:
             logger.info(f"Invoking LLM Scorer for candidate: {cv.name}")
@@ -140,12 +163,19 @@ class LLMScorer:
                 culture_fit=culture_score
             )
             
+            reasoning_combined = (
+                f"**Skills:** {raw_evaluation.reasoning_skills}\n"
+                f"**Experience:** {raw_evaluation.reasoning_experience}\n"
+                f"**Education:** {raw_evaluation.reasoning_education}\n"
+                f"**Culture Fit:** {raw_evaluation.reasoning_culture}"
+            )
+            
             result = ScoringResult(
                 match_score=final_score,
                 breakdown=breakdown,
                 missing_skills=raw_evaluation.missing_skills,
                 strengths=raw_evaluation.strengths,
-                reasoning=raw_evaluation.reasoning
+                reasoning=reasoning_combined
             )
             
             logger.info(f"Finished qualitative scoring. Final Match Score: {result.match_score}%")
