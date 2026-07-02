@@ -28,16 +28,16 @@ class CVSchema(BaseModel):
     languages: List[str] = Field(default_factory=list, description="Languages spoken")
     summary: Optional[str] = Field(None, description="Professional summary or bio")
     industry: Optional[str] = Field(None, description="Primary industry (e.g., IT, Banking, Healthcare)")
-    domain_specific_fields: Dict[str, str] = Field(default_factory=dict, description="Flexible domain-specific fields")
 
 class JDSchema(BaseModel):
     position: str = Field(description="Target job title")
-    required_skills: List[str] = Field(default_factory=list, description="Essential skills and technologies required")
-    nice_to_have: List[str] = Field(default_factory=list, description="Preferred or optional skills")
+    required_skills: List[str] = Field(default_factory=list, description="Essential skills and technologies (MUST BE SHORT KEYWORDS ONLY, NO SENTENCES. e.g. 'Python', 'ChatGPT', 'Sales')")
+    nice_to_have: List[str] = Field(default_factory=list, description="Preferred skills (SHORT KEYWORDS ONLY)")
     min_exp_years: float = Field(0.0, description="Minimum years of relevant experience required")
     level: str = Field("Mid", description="Required seniority level (e.g., Junior, Mid, Senior)")
     domain: str = Field(description="Business domain or technical focus area (e.g., Fintech, Backend, DevOps, Sales)")
     industry: str = Field(description="Industry category (e.g., IT, Retail, Healthcare)")
+    major: Optional[str] = Field(None, description="Required field of study or major (e.g. Computer Science, Information Technology)")
     education_requirement: Optional[str] = Field(None, description="Minimum or preferred education level")
     location: Optional[str] = Field(None, description="Job location")
 

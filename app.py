@@ -4,17 +4,15 @@ import uuid
 import json
 import logging
 from typing import Optional, List
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger("CVMatcherAPI")
+from utils.logger import setup_logger
+logger = setup_logger("CVMatcherAPI", log_file="api.log")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +41,20 @@ except Exception as e:
     logger.error(f"Failed to initialize CVMatcherPipeline: {e}", exc_info=True)
     pipeline = None
 
+def background_ontology_wiring(threshold: int = 10):
+    """Background task to run incremental ontology wiring if orphan node thresholds are met."""
+    try:
+        logger.info(f"Checking for unwired ontology nodes (Threshold: {threshold})...")
+        from GRAPHRAG.ontology_wire import OntologyWire
+        wire = OntologyWire()
+        wire.wire_major_ontology(threshold=threshold)
+        wire.wire_jobposition_ontology(threshold=threshold)
+        wire.wire_skill_ontology(threshold=threshold)
+        wire.wire_skillgroup_skill_ontology(threshold=threshold)
+        wire.wire_company_industry_ontology(threshold=threshold)
+    except Exception as e:
+        logger.error(f"Background ontology wiring failed: {e}")
+
 @app.get("/api/health")
 def health_check():
     return {
@@ -62,7 +74,7 @@ def get_candidates():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/upload_cv")
-def upload_cv(file: UploadFile = File(...)):
+def upload_cv(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     if not pipeline:
         raise HTTPException(status_code=530, detail="Matcher pipeline is not initialized")
     try:
@@ -82,6 +94,9 @@ def upload_cv(file: UploadFile = File(...)):
             
         cv_schema = pipeline.ingest_cv(saved_path, cv_id=cv_id)
             
+        # Trigger event-driven threshold check in background (Non-blocking)
+        background_tasks.add_task(background_ontology_wiring, 10)
+
         return {
             "status": "success",
             "id": cv_id,
