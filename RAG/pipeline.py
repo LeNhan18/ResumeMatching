@@ -294,9 +294,11 @@ class CVMatcherPipeline:
             hard_match_res = hard_match(cv, jd)
             
             # Run Scorer
+
             graph_insights = hit.get("graph_insights", [])
             scoring_res = self.scorer.score_candidate(cv, jd, hard_match_res, soft_score, weights, graph_insights)
             
+
             ranked_results.append({
                 "candidate_id": cv_id,
                 "candidate_name": cv.name,

@@ -58,10 +58,10 @@ interface Weights {
 }
 
 const PRESETS = [
-  { name: 'Balanced ⚖️', weights: { skills: 40, experience: 30, education: 15, culture_fit: 15 } },
-  { name: 'Tech Heavy 🛠️', weights: { skills: 60, experience: 20, education: 10, culture_fit: 10 } },
-  { name: 'Tenure & Lead 🏢', weights: { skills: 30, experience: 50, education: 10, culture_fit: 10 } },
-  { name: 'Junior & Academic 🎓', weights: { skills: 35, experience: 15, education: 30, culture_fit: 20 } }
+  { name: 'Balanced ', weights: { skills: 40, experience: 30, education: 15, culture_fit: 15 } },
+  { name: 'Tech Heavy ', weights: { skills: 60, experience: 20, education: 10, culture_fit: 10 } },
+  { name: 'Tenure & Lead ', weights: { skills: 30, experience: 50, education: 10, culture_fit: 10 } },
+  { name: 'Junior & Academic ', weights: { skills: 35, experience: 15, education: 30, culture_fit: 20 } }
 ];
 
 export default function App() {
@@ -346,8 +346,8 @@ export default function App() {
             <div className="collage-eye">
               <div className="collage-pupil"></div>
             </div>
-            <div style={{ position: 'absolute', bottom: '10px', right: '10px', fontSize: '2.5rem' }}>🎯</div>
-            <div style={{ position: 'absolute', top: '10px', left: '10px', fontSize: '2rem' }}>📄</div>
+            <div style={{ position: 'absolute', bottom: '10px', right: '10px', fontSize: '2.5rem' }}></div>
+            <div style={{ position: 'absolute', top: '10px', left: '10px', fontSize: '2rem' }}></div>
           </div>
         </div>
       </section>
