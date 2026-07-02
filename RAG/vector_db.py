@@ -4,8 +4,9 @@ import hashlib
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger("QdrantDB", log_file="qdrant_db.log")
 load_dotenv()
 
 # =====================================================================
