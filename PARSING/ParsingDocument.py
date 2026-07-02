@@ -1,6 +1,10 @@
 import os
 import logging
-
+import fitz
+from PIL import Image
+import io
+import base64
+from LLM.client import LLMClient
 logger = logging.getLogger(__name__)
 
 def parse_pdf_native(file_path: str) -> str:
@@ -69,9 +73,7 @@ def parse_docx(file_path: str) -> str:
 
 def pdf_to_images(pdf_path: str) -> list:
     """Renders all pages of a PDF into PIL Images using PyMuPDF."""
-    import fitz
-    from PIL import Image
-    import io
+
     images = []
     try:
         logger.info(f"Rendering PDF pages to images for OCR: {pdf_path}")
@@ -117,10 +119,7 @@ def parse_with_surya(images: list) -> str:
 
 def parse_with_vlm(images: list) -> str:
     """Performs cloud-based OCR/transcription using a Vision-Language Model via OpenRouter."""
-    import io
-    import base64
-    from LLM.client import LLMClient
-    
+
     llm = LLMClient()
     if not llm.is_configured():
         logger.warning("LLM client is not configured. Cannot call VLM API.")
@@ -168,8 +167,6 @@ def parse_image_ocr(file_path: str) -> str:
     """
     Renders scanned PDFs or opens image files, then performs OCR using Surya (local) or VLM (API fallback).
     """
-    from PIL import Image
-    
     logger.info(f"OCR/VLM parsing initiated for: {file_path}")
     ext = os.path.splitext(file_path)[1].lower()
     
